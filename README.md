@@ -1,8 +1,3 @@
-Here's a simple and clean `README.md` template you can use for your Python app:
-
----
-
-````markdown
 # Chat App (PyQt + RSA-OAEP)
 
 This is a PyQt-based chat application that uses manual RSA-OAEP encryption for secure messaging.
@@ -67,5 +62,3 @@ pip freeze > req.txt
 ## 🙋 Support
 
 If you encounter issues, feel free to open an issue or PR.
-
-```
