@@ -7,7 +7,7 @@ This is a PyQt-based chat application that uses manual RSA-OAEP encryption for s
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/chat-app.git
+git clone https://github.com/ahmedmohammedfawzy/RSA-ChatApp.git
 cd chat-app
 ````
 
