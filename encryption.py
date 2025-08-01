@@ -92,7 +92,7 @@ def mgf1(seed: bytes, length: int):
     #This return format handles cases where the last hash append made the output longer than needed
     return output[:length]
 
-def oaep_encode(message: bytes, label: bytes = b'') -> bytes:
+def oaep_encode(message: bytes, n:int,label: bytes = b'') -> bytes:
     k = (n.bit_length() + 7) // 8
     hLen = hashlib.sha256().digest_size
     mLen = len(message)
@@ -114,13 +114,13 @@ def oaep_encode(message: bytes, label: bytes = b'') -> bytes:
     seed = os.urandom(hLen)
 
     # Step 5: dbMask = MGF1(seed, len(DB))
-    dbMask = mgf1(seed, k - hLen - 1, hashlib.sha256)
+    dbMask = mgf1(seed, k - hLen - 1)
 
     # Step 6: maskedDB = DB ⊕ dbMask
     maskedDB = bytes(x ^ y for x, y in zip(DB, dbMask))
 
     # Step 7: seedMask = MGF1(maskedDB, hLen)
-    seedMask = mgf1(maskedDB, hLen, hashlib.sha256)
+    seedMask = mgf1(maskedDB, hLen)
 
     # Step 8: maskedSeed = seed ⊕ seedMask
     maskedSeed = bytes(x ^ y for x, y in zip(seed, seedMask))
@@ -130,25 +130,75 @@ def oaep_encode(message: bytes, label: bytes = b'') -> bytes:
 
     return EncodedMessage
 
+def oaep_decode(encoded: bytes, n: int, label: bytes = b'') -> bytes:
+    k = (n.bit_length() + 7) // 8
+    hLen = hashlib.sha256().digest_size
 
-def RSAencrypt(plaintext,n,e=65537):
+    if len(encoded) != k:
+        raise ValueError("Decryption error: encoded length mismatch")
+
+    if k < 2 * hLen + 2:
+        raise ValueError("Decryption error: k too small")
+
+    Y = encoded[0]
+    maskedSeed = encoded[1:hLen + 1]
+    maskedDB = encoded[hLen + 1:]
+
+    # Step 1: seedMask = MGF1(maskedDB, hLen)
+    seedMask = mgf1(maskedDB, hLen)
+
+    # Step 2: seed = maskedSeed ⊕ seedMask
+    seed = bytes(x ^ y for x, y in zip(maskedSeed, seedMask))
+
+    # Step 3: dbMask = MGF1(seed, k - hLen - 1)
+    dbMask = mgf1(seed, k - hLen - 1)
+
+    # Step 4: DB = maskedDB ⊕ dbMask
+    DB = bytes(x ^ y for x, y in zip(maskedDB, dbMask))
+
+    # Step 5: Separate DB into lHash', PS, 0x01, M
+    lHash = hashlib.sha256(label).digest()
+    lHash_prime = DB[:hLen]
+
+    if lHash != lHash_prime:
+        raise ValueError("Decryption error: label hash mismatch")
+
+    # Step 6: Find the position of the 0x01 byte separating PS and M
+    i = hLen
+    while i < len(DB):
+        if DB[i] == 0x01:
+            break
+        elif DB[i] != 0x00:
+            raise ValueError("Decryption error: invalid padding")
+        i += 1
+    else:
+        raise ValueError("Decryption error: 0x01 not found")
+
+    # Step 7: Return the message after 0x01
+    return DB[i + 1:]
+
+def RSA_OAEPencrypt(byte_message,n,e=65537):
     # Encode the string to bytes UTF-8
-    byte_message = plaintext.encode('utf-8')
     # Convert bytes to an integer
     # 'big'  means the most significant byte is at the beginning
     # m is the numerical value of the message
-    m = int.from_bytes(byte_message, 'big', signed=False)
+    encoded = oaep_encode(message.encode('utf-8'), n)
+    m = int.from_bytes(encoded, 'big')
     ciphertext = pow(m, e, n)
     return ciphertext
 
-def RSAdecrypt(ciphertext,n,d):
-    m = pow(ciphertext,d,n)
-    message_bytes = m.to_bytes((m.bit_length() + 7) // 8, byteorder='big')
-    original_message = message_bytes.decode('utf-8')
-    return original_message
+def RSA_OAEPdecrypt(ciphertext,n,d):
+    k = (n.bit_length() + 7) // 8
+    m = pow(ciphertext, d, n)
+    message_bytes = m.to_bytes(k, byteorder='big') 
+    decoded = oaep_decode(message_bytes, n)
+    return decoded.decode('utf-8')
 
 
 
+message = "Hello Fawzy"
+ciphertext = RSA_OAEPencrypt(message, n)
+print("Encrypted:", ciphertext)
 
-message = "Hello"
-encrypted = RSAencrypt(oaep_encode(message))
+plaintext = RSA_OAEPdecrypt(ciphertext, n, d)
+print("Decrypted:", plaintext)
