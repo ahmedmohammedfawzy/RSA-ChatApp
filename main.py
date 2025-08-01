@@ -6,6 +6,9 @@ import websockets
 import asyncio
 import sys
 import threading
+import json
+
+global_username = ""
 
 class WebSocketClient(QObject):
     message_received = pyqtSignal(str)
@@ -48,18 +51,19 @@ class WebSocketClient(QObject):
             self.loop.call_soon_threadsafe(self.loop.stop)
 
     def send_message(self, msg: str):
+        structured_msg = {"username": global_username, "msg": msg}
         if self.websocket and self.loop and self.websocket.state == websockets.protocol.State.OPEN:
-            asyncio.run_coroutine_threadsafe(self.websocket.send(msg), self.loop)
+            asyncio.run_coroutine_threadsafe(self.websocket.send(json.dumps(structured_msg)), self.loop)
         else:
             print("⚠️ WebSocket is not connected.")
 
 class MessageBubble(QWidget):
-    def __init__(self, message, is_user=True, timestamp=None, username=None):
+    def __init__(self, message, is_user=True, username=None):
         super().__init__()
         self.message = message
         self.is_user = is_user
-        self.timestamp = timestamp or datetime.now()
-        self.username = username or ("You" if is_user else "Other")
+        self.timestamp = datetime.now()
+        self.username = global_username if is_user else username
         self.setup_ui()
     
     def setup_ui(self):
@@ -202,8 +206,8 @@ class ChatScrollArea(QScrollArea):
             }
         """)
 
-    def add_message(self, message, is_user=True):
-        bubble = MessageBubble(message, is_user)
+    def add_message(self, message, is_user=True, username=None):
+        bubble = MessageBubble(message, is_user, username)
         # Insert before the stretch
         self.content_layout.insertWidget(self.content_layout.count() - 1, bubble)
 
@@ -223,6 +227,17 @@ class ChatWindow(QMainWindow):
         self.setGeometry(100, 100, 400, 600)
         self.setup_ui()
         self.start_websocket();
+
+        pop = QWidget()
+        pop.setWindowTitle("Username Request")
+
+        username, ok = QInputDialog.getText(pop, "Login", "Enter your username:")
+
+        if ok:
+            global global_username
+            global_username = username
+        else:
+            sys.exit() 
 
 
     def setup_ui(self):
@@ -361,7 +376,9 @@ class ChatWindow(QMainWindow):
         self.websocket_thread.start()
 
     def handle_incoming_message(self, message):
-        self.chat_area.add_message(message, is_user=False)
+        msg_obj = json.loads(message)
+        print(msg_obj["msg"])
+        self.chat_area.add_message(msg_obj["msg"], is_user=False, username=msg_obj["username"])
 
     def closeEvent(self, a0):
         if self.websocket_client:
@@ -381,6 +398,7 @@ def main():
 
     window = ChatWindow()
     window.show()
+
 
     sys.exit(app.exec_())
 
