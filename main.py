@@ -1,29 +1,119 @@
-import sys
 from datetime import datetime
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
+import websockets
+import asyncio
+import sys
+import threading
+
+class WebSocketClient(QObject):
+    message_received = pyqtSignal(str)
+    connected = pyqtSignal()
+    disconnected = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, uri):
+        super().__init__()
+        self.uri = uri
+        self.keep_running = True
+        self.websocket = None
+        self.loop = None
+        self.lock = threading.Lock()
+
+    async def listen(self):
+        try:
+            async with websockets.connect(self.uri) as websocket:
+                self.websocket = websocket
+                self.connected.emit()
+                while self.keep_running:
+                    try:
+                        msg = await websocket.recv()
+                        self.message_received.emit(msg)
+                    except websockets.ConnectionClosed:
+                        break
+        except Exception as e:
+            self.error.emit(str(e))
+        self.websocket = None
+        self.disconnected.emit()
+
+    def start(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self.listen())
+
+    def stop(self):
+        self.keep_running = False
+        if self.loop:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+
+    def send_message(self, msg: str):
+        if self.websocket and self.loop and self.websocket.state == websockets.protocol.State.OPEN:
+            asyncio.run_coroutine_threadsafe(self.websocket.send(msg), self.loop)
+        else:
+            print("⚠️ WebSocket is not connected.")
 
 class MessageBubble(QWidget):
-    def __init__(self, message, is_user=True, timestamp=None):
+    def __init__(self, message, is_user=True, timestamp=None, username=None):
         super().__init__()
         self.message = message
         self.is_user = is_user
         self.timestamp = timestamp or datetime.now()
+        self.username = username or ("You" if is_user else "Other")
         self.setup_ui()
-
+    
     def setup_ui(self):
-        layout = QHBoxLayout()
-        layout.setContentsMargins(10, 5, 10, 5)
-
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Create container for message content
+        message_container = QVBoxLayout()
+        message_container.setSpacing(2)
+        
+        # Create username and timestamp header
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        username_label = QLabel(self.username)
+        username_label.setStyleSheet("""
+            QLabel {
+                color: #666666;
+                font-size: 12px;
+                font-weight: bold;
+                margin: 0px;
+                padding: 0px;
+            }
+        """)
+        
+        timestamp_label = QLabel(self.timestamp.strftime("%H:%M"))
+        timestamp_label.setStyleSheet("""
+            QLabel {
+                color: #999999;
+                font-size: 11px;
+                margin: 0px;
+                padding: 0px;
+            }
+        """)
+        
+        separator_label = QLabel("•")
+        separator_label.setStyleSheet("""
+            QLabel {
+                color: #CCCCCC;
+                font-size: 11px;
+                margin: 0px 3px;
+                padding: 0px;
+            }
+        """)
+        
         # Create message bubble
         bubble = QLabel(self.message)
         bubble.setWordWrap(True)
         bubble.setMaximumWidth(400)
         bubble.setMinimumHeight(40)
-
-        # Style the bubble based on sender
+        
+        # Style and arrange based on sender
         if self.is_user:
+            # User messages - right aligned
             bubble.setStyleSheet("""
                 QLabel {
                     background-color: #007AFF;
@@ -33,9 +123,22 @@ class MessageBubble(QWidget):
                     font-size: 14px;
                 }
             """)
-            layout.addStretch()
-            layout.addWidget(bubble)
+            
+            # Right-align header
+            header_layout.addStretch()
+            header_layout.addWidget(username_label)
+            header_layout.addWidget(separator_label)
+            header_layout.addWidget(timestamp_label)
+            
+            # Add header and bubble to container
+            message_container.addLayout(header_layout)
+            message_container.addWidget(bubble, alignment=Qt.AlignRight)
+            
+            # Right-align the entire message
+            main_layout.addStretch()
+            main_layout.addLayout(message_container)
         else:
+            # Assistant messages - left aligned
             bubble.setStyleSheet("""
                 QLabel {
                     background-color: #E5E5EA;
@@ -45,10 +148,22 @@ class MessageBubble(QWidget):
                     font-size: 14px;
                 }
             """)
-            layout.addWidget(bubble)
-            layout.addStretch()
-
-        self.setLayout(layout)
+            
+            # Left-align header
+            header_layout.addWidget(username_label)
+            header_layout.addWidget(separator_label)
+            header_layout.addWidget(timestamp_label)
+            header_layout.addStretch()
+            
+            # Add header and bubble to container
+            message_container.addLayout(header_layout)
+            message_container.addWidget(bubble, alignment=Qt.AlignLeft)
+            
+            # Left-align the entire message
+            main_layout.addLayout(message_container)
+            main_layout.addStretch()
+        
+        self.setLayout(main_layout)
 
 class ChatScrollArea(QScrollArea):
     def __init__(self):
@@ -102,10 +217,13 @@ class ChatScrollArea(QScrollArea):
 class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.websocket_thread = None
+        self.websocket_client = None
         self.setWindowTitle("Conversation")
         self.setGeometry(100, 100, 400, 600)
         self.setup_ui()
-        self.load_sample_messages()
+        self.start_websocket();
+
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -147,30 +265,7 @@ class ChatWindow(QMainWindow):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(15, 10, 15, 10)
 
-        # Profile picture placeholder
-        profile_pic = QLabel()
-        profile_pic.setFixedSize(40, 40)
-        profile_pic.setStyleSheet("""
-            QLabel {
-                background-color: #666;
-                border-radius: 20px;
-                border: none;
-            }
-        """)
-        profile_pic.setText("B")
-        profile_pic.setAlignment(Qt.AlignCenter)
-        profile_pic.setStyleSheet("""
-            QLabel {
-                background-color: #666;
-                border-radius: 20px;
-                color: white;
-                font-weight: bold;
-                font-size: 16px;
-            }
-        """)
-
-        # Name
-        name_label = QLabel("Bolbol")
+        name_label = QLabel("Chat Room")
         name_label.setStyleSheet("""
             QLabel {
                 font-size: 18px;
@@ -180,8 +275,6 @@ class ChatWindow(QMainWindow):
             }
         """)
 
-        layout.addWidget(profile_pic)
-        layout.addSpacing(10)
         layout.addWidget(name_label)
         layout.addStretch()
 
@@ -250,28 +343,35 @@ class ChatWindow(QMainWindow):
             self.chat_area.add_message(message, is_user=True)
             self.message_input.clear()
 
-            # Simulate response after a short delay
-            QTimer.singleShot(1000, lambda: self.simulate_response(message))
+        # Send to WebSocket
+        if self.websocket_client:
+            self.websocket_client.send_message(message)
 
-    def simulate_response(self, user_message):
-        # Simple response simulation
-        responses = [
-            "I understand what you mean.",
-            "I see your point.",
-            "That makes sense to me."
-        ]
+    def start_websocket(self):
+        self.websocket_client = WebSocketClient("ws://localhost:6789")
+        self.websocket_thread = QThread()
+        self.websocket_client.moveToThread(self.websocket_thread)
 
-        import random
-        response = random.choice(responses)
-        self.chat_area.add_message(response, is_user=False)
+        self.websocket_thread.started.connect(self.websocket_client.start)
+        self.websocket_client.message_received.connect(self.handle_incoming_message)
+        self.websocket_client.connected.connect(lambda: print("🟢 Connected to server"))
+        self.websocket_client.disconnected.connect(lambda: print("🔴 Disconnected from server"))
+        self.websocket_client.error.connect(lambda err: print(f"❌ WebSocket error: {err}"))
 
-    def load_sample_messages(self):
-        # Add some sample messages to match the screenshot
-        sample_messages = [
-        ]
+        self.websocket_thread.start()
 
-        for message, is_user in sample_messages:
-            self.chat_area.add_message(message, is_user)
+    def handle_incoming_message(self, message):
+        self.chat_area.add_message(message, is_user=False)
+
+    def closeEvent(self, a0):
+        if self.websocket_client:
+            self.websocket_client.stop()
+        if self.websocket_thread:
+            self.websocket_thread.quit()
+            self.websocket_thread.wait()
+        a0.accept()
+
+
 
 def main():
     app = QApplication(sys.argv)
