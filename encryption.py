@@ -88,8 +88,7 @@ def mgf1(seed: bytes, length: int):
     #This return format handles cases where the last hash append made the output longer than needed
     return output[:length]
 
-def oaep_encode(message: bytes, n:int,label: bytes = b'') -> bytes:
-    k = (n.bit_length() + 7) // 8
+def oaep_encode(message: bytes, k:int,label: bytes = b'') -> bytes:
     hLen = hashlib.sha256().digest_size
     mLen = len(message)
 
@@ -126,8 +125,7 @@ def oaep_encode(message: bytes, n:int,label: bytes = b'') -> bytes:
 
     return EncodedMessage
 
-def oaep_decode(encoded: bytes, n: int, label: bytes = b'') -> bytes:
-    k = (n.bit_length() + 7) // 8
+def oaep_decode(encoded: bytes, k: int, label: bytes = b'') -> bytes:
     hLen = hashlib.sha256().digest_size
 
     if len(encoded) != k:
@@ -173,21 +171,18 @@ def oaep_decode(encoded: bytes, n: int, label: bytes = b'') -> bytes:
     # Step 7: Return the message after 0x01
     return DB[i + 1:]
 
-def RSA_OAEPencrypt(byte_message,n,e=65537):
-    # Encode the string to bytes UTF-8
-    # Convert bytes to an integer
-    # 'big'  means the most significant byte is at the beginning
-    # m is the numerical value of the message
-    encoded = oaep_encode(message.encode('utf-8'), n)
+def RSA_OAEPencrypt(message, n, e=65537):
+    k = (n.bit_length() + 7) // 8  
+    encoded = oaep_encode(message.encode('utf-8'), k)  
     m = int.from_bytes(encoded, 'big')
     ciphertext = pow(m, e, n)
     return ciphertext
 
-def RSA_OAEPdecrypt(ciphertext,n,d):
+def RSA_OAEPdecrypt(ciphertext, n, d):
     k = (n.bit_length() + 7) // 8
     m = pow(ciphertext, d, n)
     message_bytes = m.to_bytes(k, byteorder='big') 
-    decoded = oaep_decode(message_bytes, n)
+    decoded = oaep_decode(message_bytes, k)  
     return decoded.decode('utf-8')
 
 
