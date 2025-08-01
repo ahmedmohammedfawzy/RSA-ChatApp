@@ -77,10 +77,6 @@ d = modinv(e,phi)
 print("d = ",d,"\n")
 
 
-
-
-def sha256(data):
-    return hashlib.sha256(data).digest()
 def mgf1(seed: bytes, length: int):
     counter = 0
     output = b""
