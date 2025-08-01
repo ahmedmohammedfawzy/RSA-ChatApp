@@ -108,8 +108,8 @@ class MessageBubble(QWidget):
         # Create message bubble
         bubble = QLabel(self.message)
         bubble.setWordWrap(True)
-        bubble.setMaximumWidth(400)
-        bubble.setMinimumHeight(40)
+        bubble.setMaximumWidth(int(self.width() * 0.8)) 
+        print(self.message)
         
         # Style and arrange based on sender
         if self.is_user:
@@ -348,7 +348,7 @@ class ChatWindow(QMainWindow):
             self.websocket_client.send_message(message)
 
     def start_websocket(self):
-        self.websocket_client = WebSocketClient("ws://localhost:6789")
+        self.websocket_client = WebSocketClient("ws://4.234.163.3:6789")
         self.websocket_thread = QThread()
         self.websocket_client.moveToThread(self.websocket_thread)
 
