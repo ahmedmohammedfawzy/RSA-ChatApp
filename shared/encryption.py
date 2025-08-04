@@ -192,25 +192,21 @@ def oaep_decode(encoded: bytes, k: int, label: bytes = b'') -> bytes:
     # Step 7: Return the message after 0x01
     return DB[i + 1:]
 
-def encrypt_oaep(message: str, public_key, label: bytes = b''):
+def encrypt_oaep(message_bytes: bytes, public_key, label: bytes = b''):
     """Encrypt message using RSA-OAEP"""
     e, n = public_key
 
     # Calculate key size in bytes
     k = (n.bit_length() + 7) // 8
-    
-    # Convert message to bytes
-    message_bytes = message.encode('utf-8')
-    
+
     # Apply OAEP padding
     padded = oaep_encode(message_bytes, k, label)
-    
+
     # Convert padded message to integer
     m_int = int.from_bytes(padded, 'big')
-    
     # RSA encryption: c ≡ m^e mod n
     c = pow(m_int, e, n)
-    
+
     return c
 
 def decrypt_oaep(ciphertext, private_key, label: bytes = b''):
@@ -230,7 +226,7 @@ def decrypt_oaep(ciphertext, private_key, label: bytes = b''):
     message_bytes = oaep_decode(padded, k, label)
     
     # Convert back to string
-    return message_bytes.decode('utf-8')
+    return message_bytes
 
 # Legacy functions (without OAEP) - kept for compatibility
 def encrypt(message, public_key):
@@ -280,7 +276,7 @@ def demo():
     print("3. Testing RSA-OAEP encryption/decryption...")
     try:
         # Encrypt with OAEP
-        ciphertext_oaep = encrypt_oaep(original_message, public_key)
+        ciphertext_oaep = encrypt_oaep(original_message.encode(), public_key)
         print(f"   Encrypted (OAEP): {ciphertext_oaep}")
 
         # Decrypt with OAEP
@@ -318,7 +314,7 @@ def demo():
     print("5. Testing RSA-OAEP with custom label...")
     try:
         custom_label = b"MySecretLabel"
-        ciphertext_labeled = encrypt_oaep(original_message, public_key, custom_label)
+        ciphertext_labeled = encrypt_oaep(original_message.encode(), public_key, custom_label)
         decrypted_labeled = decrypt_oaep(ciphertext_labeled, private_key, custom_label)
 
         labeled_success = original_message == decrypted_labeled
@@ -348,7 +344,7 @@ def demo():
     # Test with maximum size message
     long_message = "A" * (max_message_length - 10)  # Leave some margin
     try:
-        long_cipher = encrypt_oaep(long_message, public_key)
+        long_cipher = encrypt_oaep(long_message.encode(), public_key)
         long_decrypt = decrypt_oaep(long_cipher, private_key)
         long_success = long_message == long_decrypt
         print(f"   Long message test ({len(long_message)} bytes): {long_success}")

@@ -1,7 +1,37 @@
 import asyncio
+import json
+import os
 import threading
 import websockets
+from shared import encryption
 from PyQt5.QtCore import QObject, pyqtSignal
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+
+# --- Step 1: Padding function ---
+def pad(data):
+    padder = padding.PKCS7(128).padder()
+    return padder.update(data) + padder.finalize()
+
+def unpad(padded_data):
+    unpadder = padding.PKCS7(128).unpadder()
+    return unpadder.update(padded_data) + unpadder.finalize()
+
+# --- Step 2: AES-CBC Encryption ---
+def aes_cbc_encrypt(plaintext: bytes, key: bytes, iv: bytes):
+    plaintext_padded = pad(plaintext)
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(plaintext_padded) + encryptor.finalize()
+    return ciphertext
+
+# --- Step 3: AES-CBC Decryption ---
+def aes_cbc_decrypt(ciphertext: bytes, key: bytes, iv: bytes):
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+    padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    return unpad(padded_plaintext)
 
 class WebSocketClient(QObject):
     message_received = pyqtSignal(str)
@@ -9,13 +39,15 @@ class WebSocketClient(QObject):
     disconnected = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, uri):
+    def __init__(self, uri, rsaKeySize):
         super().__init__()
         self.uri = uri
         self.keep_running = True
         self.websocket = None
         self.loop = None
         self.worker_thread = None
+        self.public_key, self.private_key = encryption.generate_keys(rsaKeySize)
+        self.aes_key = bytes(16)
 
     async def listen(self):
         try:
@@ -23,16 +55,25 @@ class WebSocketClient(QObject):
                 self.websocket = websocket
                 self.connected.emit()
 
+                await websocket.send(json.dumps({"type": "ISC", "key": self.public_key}))
+
                 while self.keep_running:
                     try:
                         msg = await websocket.recv()
-                        self.message_received.emit(msg)
+                        if isinstance(msg, str):
+                            data = json.loads(msg)
+                            enc_key: int = data["key"]
+                            key = encryption.decrypt_oaep(enc_key, self.private_key)
+                            self.aes_key = key
+                        else:
+                            dec_msg = aes_cbc_decrypt(msg[16:],self.aes_key, msg[:16])
+                            self.message_received.emit(dec_msg.decode())
                     except websockets.ConnectionClosed:
                         break
 
-        except Exception as e:
+        except Exception:
             if self.keep_running:
-                self.error.emit(str(e))
+                raise
         finally:
             self.websocket = None
             self.disconnected.emit()
@@ -70,6 +111,11 @@ class WebSocketClient(QObject):
             not self.loop.is_closed() and
             self.websocket.state == websockets.protocol.State.OPEN):
 
-            asyncio.run_coroutine_threadsafe(self.websocket.send(msg), self.loop)
+            iv = os.urandom(16)
+            enc_msg = iv + aes_cbc_encrypt(msg.encode(),self.aes_key, iv)
+            print(enc_msg)
+            asyncio.run_coroutine_threadsafe(self.websocket.send(enc_msg), self.loop)
         else:
             print("⚠️ WebSocket is not connected.")
+
+

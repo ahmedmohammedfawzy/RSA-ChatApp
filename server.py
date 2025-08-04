@@ -1,10 +1,22 @@
 import asyncio
+import os
 import websockets
+import json
+from shared import encryption
 
 connected_clients = set()
+aes_key_bytes = os.urandom(16)
+
 
 async def handler(websocket):
     connected_clients.add(websocket)
+    init_msg = await websocket.recv()
+    data = json.loads(init_msg);
+
+    pub_key = data.get("key")
+    encrypted_aes = encryption.encrypt_oaep(aes_key_bytes, pub_key)
+    await websocket.send(json.dumps({"type": "ISC", "key": encrypted_aes}))
+
     try:
         async for message in websocket:
             # Broadcast incoming message to all connected clients

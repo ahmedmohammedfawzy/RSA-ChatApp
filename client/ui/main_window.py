@@ -1,7 +1,6 @@
 import json
 import sys
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QInputDialog, QMessageBox
-from PyQt5.QtCore import QThread
 from websocekt_client import WebSocketClient
 from ui.chat_scroll_area import ChatScrollArea
 
@@ -12,44 +11,8 @@ class ChatWindow(QMainWindow):
         self.setWindowTitle("Conversation")
         self.setGeometry(100, 100, 400, 600)
         self.setup_ui()
-        self.start_websocket();
-
-        pop = QWidget()
-        pop.setWindowTitle("Username Request")
-    
-        # Get username
-        username, ok = QInputDialog.getText(pop, "Login", "Enter your username:")
-        if not ok or not username.strip():
-            sys.exit()
-    
-        # Validate username
-        username = username.strip()
-        if len(username) < 3:
-            QMessageBox.warning(pop, "Error", "Username must be at least 3 characters!")
-            sys.exit()
-    
-        self.username = username
-
-        # Get RSA key size
-        key_sizes = ["1024", "2048", "3072", "4096"]
-        key_size_str, ok = QInputDialog.getItem(pop, "RSA Key Size", "Select RSA key size (bits):", 
-                                           key_sizes, 1, False)  # Default to 2048
-        if not ok:
-            sys.exit()
-    
-        key_bits = int(key_size_str)
-    
-        # Warning for weak keys
-        if key_bits < 2048:
-            reply = QMessageBox.question(pop, "Security Warning", 
-                                   f"Key size {key_bits} bits is weak. Continue anyway?",
-                                   QMessageBox.Yes | QMessageBox.No,
-                                   QMessageBox.No)
-            if reply == QMessageBox.No:
-                sys.exit()
-
-        self.RSAKeySize = int(key_size_str)
-
+        self.get_user_info()
+        self.start_websocket()
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -163,6 +126,57 @@ class ChatWindow(QMainWindow):
 
         return input_widget
 
+    def get_user_info(self):
+        pop = QWidget()
+        pop.setWindowTitle("Username Request")
+
+        # Get username
+        username, ok = QInputDialog.getText(pop, "Login", "Enter your username:")
+        if not ok or not username.strip():
+            sys.exit()
+
+        # Validate username
+        username = username.strip()
+        if len(username) < 3:
+            QMessageBox.warning(pop, "Error", "Username must be at least 3 characters!")
+            sys.exit()
+
+        self.username = username
+
+        # Get RSA key size
+        key_sizes = ["1024", "2048", "3072", "4096"]
+        key_size_str, ok = QInputDialog.getItem(pop, 
+                                                "RSA Key Size", 
+                                                "Select RSA key size (bits):", 
+                                                key_sizes, 1, False)  # Default to 2048
+        if not ok:
+            sys.exit()
+
+        key_bits = int(key_size_str)
+
+        # Warning for weak keys
+        if key_bits < 2048:
+            reply = QMessageBox.question(pop, "Security Warning", 
+                                   f"Key size {key_bits} bits is weak. Continue anyway?",
+                                   QMessageBox.Yes | QMessageBox.No,
+                                   QMessageBox.No)
+            if reply == QMessageBox.No:
+                sys.exit()
+
+        self.RSAKeySize = int(key_size_str)
+
+    def start_websocket(self):
+        # 4.234.163.3
+        self.websocket_client = WebSocketClient("ws://4.234.163.3:6789", self.RSAKeySize)
+
+        # Connect signals
+        self.websocket_client.message_received.connect(self.handle_incoming_message)
+        self.websocket_client.connected.connect(lambda: print("🟢 Connected to server"))
+        self.websocket_client.disconnected.connect(lambda: print("🔴 Disconnected from server"))
+        self.websocket_client.error.connect(lambda err: print(f"❌ WebSocket error: {err}"))
+
+        self.websocket_client.start()
+
     def send_message(self):
         message = self.message_input.text().strip()
         structured_msg = {"username": self.username, "msg": message}
@@ -174,22 +188,10 @@ class ChatWindow(QMainWindow):
         if self.websocket_client:
             self.websocket_client.send_message(json.dumps(structured_msg))
 
-    def start_websocket(self):
-        self.websocket_client = WebSocketClient("ws://4.234.163.3:6789")
-
-        # Connect signals
-        self.websocket_client.message_received.connect(self.handle_incoming_message)
-        self.websocket_client.connected.connect(lambda: print("🟢 Connected to server"))
-        self.websocket_client.disconnected.connect(lambda: print("🔴 Disconnected from server"))
-        self.websocket_client.error.connect(lambda err: print(f"❌ WebSocket error: {err}"))
-
-        self.websocket_client.start()
-
 
     def handle_incoming_message(self, message):
         try:
             msg_obj = json.loads(message)
-            print(msg_obj["msg"])
             self.chat_area.add_message(msg_obj["msg"], is_user=False, username=msg_obj["username"])
         except json.JSONDecodeError as e:
             print(f"Failed to parse message: {e}")
